@@ -1,9 +1,8 @@
 <html>
 <head>
-    <link rel="stylesheet" href="/css/bootstrap.css">
-    <script src="/scripts/bootstrap.js"></script>
-    <script src="/scripts/jquery.js"></script>
-    <script src="/socket.io/socket.io.js"></script>
+    <link rel="stylesheet" href="css/bootstrap.css">
+    <script src="scripts/bootstrap.js"></script>
+    <script src="scripts/jquery.js"></script>
 </head>
 <body>
 <table class="table table-striped">
@@ -20,13 +19,17 @@
 </table>
 <script>
     $(function () {
-        const socket = io();
+        const socket = new WebSocket("ws://localhost:80");
         let scores = [];
-        socket.emit("device-highscores");
-        socket.on("update-scores", function(data) {
-            scores = sortScores(data.scores);
-            displayScores();
-        });
+        socket.onopen = e => {
+            socket.send(JSON.stringify({message: "device", device: "scoreboard"))
+        };
+        socket.onmessage = m => {
+            if (m.message === "update-scores") {
+                scores = sortScores(m.data.scores);
+                displayScores();
+            }
+        };
         function displayScores() {
             let a = "";
             for (let i=0; i<scores.length; i++) {
@@ -34,7 +37,7 @@
                 let b = "<tr>";
                 b += "<td>"+(i+1)+"</td>";
                 b += "<td>"+score.name+"</td>";
-                b += "<td>"+score.time+"</td>";
+                b += "<td>"+formatTime(score.time)+"</td>";
                 b += "</tr>";
                 a += b;
             }
@@ -45,6 +48,19 @@
                 return a.time - b.time;
             });
             return scores;
+        }
+
+        function formatTime(t) {
+            let mic=t%100, te=t/100, sec=te%60, min=te/60;
+            return l0(min,2)+":"+l0(sec,2)+"."+l0(mic,2)
+        }
+
+        function l0(num,len) {
+            num = ""+num;
+            while (num.length < len) {
+                num = "0"+num;
+            }
+            return num;
         }
     });
 </script>

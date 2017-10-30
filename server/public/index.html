@@ -26,10 +26,10 @@
 
 
 
-<script src="/socket.io/socket.io.js"></script>
+<script src=""></script>
 <script src="scripts/jquery-3.2.1.min.js"></script>
 <script src="scripts/bootstrap.js"></script>
-<script src="https://sk-cdn.net/libraries/piechartjs/pie.js"></script>
+<script src="scripts/piechart.js"></script>
 <script>
 
     let first = true;
@@ -43,7 +43,7 @@
 
 
     $(function () {
-        const socket = io();
+        const socket = new WebSocket("ws://localhost:80");
         let uid;
         if (window.localStorage.getItem("uid"))
             uid = window.localStorage.getItem("uid");
@@ -53,43 +53,55 @@
             uid = array[0];
             window.localStorage.setItem("uid", uid);
         }
+        let sendData = {data: {uid: uid, name:name}, device: "user"};
 
+        socket.onopen = e => {
+            sendData.message = "device";
+            socket.send(JSON.stringify(sendData));
 
-        socket.on('update-points', data => {
-            $("#led-counter").html(data.leds);
-        });
+            new PieChart({
+                container: document.getElementById("controller"),
+                data: [{
+                    value: 20,
+                    col: "#fff",
+                    legend: "right"
+                }, {
+                    value: 20,
+                    col: "#fff",
+                    legend: "top"
+                }, {
+                    value: 20,
+                    col: "#fff",
+                    legend: "left"
+                }, {
+                    value: 20,
+                    col: "#fff",
+                    legend: "bottom"
+                }],
+                onMouseEnterSlice: function(sliceData) {
+                    mouseEntered(sliceData);
+                },
+                onMouseLeaveSlice: function(sliceData) {
+                    sliceData = undefined;
+                    sendData.message = "control";
+                    sendData.data.action = "stop";
+                    socket.send(JSON.stringify(sendData));
+                }
+            });
+        };
 
-
-        let data = {uid: uid, name:name};
-        socket.emit("device-user", data);
-
-        new PieChart({
-            container: document.getElementById("controller"),
-            data: [{
-                value: 20,
-                col: "#fff",
-                legend: "right"
-            }, {
-                value: 20,
-                col: "#fff",
-                legend: "top"
-            }, {
-                value: 20,
-                col: "#fff",
-                legend: "left"
-            }, {
-                value: 20,
-                col: "#fff",
-                legend: "bottom"
-            }],
-            onMouseEnterSlice: function(sliceData) {
-                mouseEntered(sliceData);
-            },
-            onMouseLeaveSlice: function(sliceData) {
-                sliceData = undefined;
-                socket.emit("control-stop", data);
+        socket.onmessage = event => {
+            let message = event.data;
+            console.log(message);
+            if (message.message === "led-counter" && message.device === "server") {
+                if (message.data.action === "++") {
+                    $("#led-counter").html(parseInt($("#led-counter").html())+1);
+                }
             }
-        });
+        };
+
+
+
 
 
         function mouseEntered(d){
@@ -97,11 +109,10 @@
             if (first) {
                 first = false;
                 startTimer();
-                socket.emit("control-start-"+move(d), data);
             }
-            else {
-                socket.emit("control-start-"+move(d), data);
-            }
+            sendData.message = "control";
+            sendData.data.action = move(d);
+            socket.send(JSON.stringify(sendData));
         }
 
         function move(d){
