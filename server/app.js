@@ -1,13 +1,15 @@
+const fs = require('fs');
 const express = require('express');
 const app = express();
 const http = require('http');
 const WebSocket = require('ws');
 const server = http.createServer(app);
 app.use(express.static('public'));
+const basicAuth = require('express-basic-auth');
 const wss = new WebSocket.Server({ server });
 
 let scoreBoard = [
-    {name: "LamPi-Team", time: 6399}
+    {name: "LamPi-Team", time: 6399, uid: 1}
 ];
 
 Array.prototype.nextLED = function (b) {
@@ -37,15 +39,39 @@ const LEDs = [
 
 let reachedLEDs = [];
 
-let currentLED = LEDs.nextLED(reachedLEDs);
+let currentLED = {c:10, sn:"AE:1F:61:63"};
 
 app.all('/', (req, res) => {
-	res.sendFile(__dirname + '/public/index.html');
+	res.sendFile(__dirname + '/html/index.html');
 });
 
 app.get('/highScoreList', (req, res) => {
-	res.sendFile(__dirname + '/public/highscorelist.html');
+	res.sendFile(__dirname + '/html/highscorelist.html');
 });
+
+app.get('/ladmin', basicAuth({ users: { 'lampiadmin': 'lampi1234' }, challenge: true, realm: 'LamPi Admin Dashboard' }), (req, res) => {
+    res.sendFile(__dirname + '/html/admin.html');
+});
+
+app.get('/api/scores', (req, res) => {
+    res.json(scoreBoard);
+});
+
+app.get('/api/clients', (req, res) => {
+    res.json(getClients());
+});
+
+function getClients() {
+    let a = [];
+    wss.clients.forEach(c => {
+        let b = {};
+        b.type = c.device;
+        b.ip = c.ipAddress;
+        b.id = c.id;
+        a.push(b);
+    });
+    return a;
+}
 
 function heartbeat() {
     this.isAlive = true;
@@ -58,6 +84,8 @@ wss.on('connection', function connection(socket, req) {
 
 	console.log('A new Client connected from ' + req.connection.remoteAddress);
 
+	socket.ipAddress = req.connection.remoteAddress;
+
 	socket.on("message", message => {
 	    console.log("Message received from client: " + message);
 	    message = JSON.parse(message);
@@ -68,10 +96,25 @@ wss.on('connection', function connection(socket, req) {
                 onDevice();
                 break;
             case "control":
-                onCtrlCar(message.action);
+                onCtrlCar(message.data.action);
                 break;
             case "over-led":
-                onOverLED(message.data.sn);
+                if(message.device === "car-mifare")
+                    onOverLED(message.sn);
+                break;
+            case "start":
+                if(message.device === "user")
+                    startGame(message);
+                break;
+            case "stop":
+                if(message.device === "user")
+                    stopGame(message);
+                break;
+            case "save-scores":
+                saveScores(message);
+                break;
+            case "rem-clients":
+                remClients(message);
                 break;
             default:
                 console.log("Unknown Message dropped!");
@@ -80,11 +123,28 @@ wss.on('connection', function connection(socket, req) {
 
     });
 
+	function saveScores(m) {
+        if (m.device === "admin") {
+            let t = new Date;
+            t = t.getDate() + "." + (t.getMonth()+1) + "." + t.getFullYear() + "-" + t.getHours() + "_" + t.getMinutes() + "_" + t.getSeconds();
+            fs.writeFileSync(__dirname + "/scores_"+t+".json", JSON.stringify(scoreBoard));
+        }
+    }
+
+    function remClients(m) {
+        if (m.device === "admin") {
+            wss.clients.forEach(c => {
+               if (c.device === "user")
+                   c.close();
+            });
+        }
+    }
+
 	function onDevice() {
 	    console.log("The Client is a " + socket.device);
         switch(socket.device) {
             case "user":
-                console.info("------- GAME STARTED -------");
+                console.info("------- PLAYER CONNECTED -------");
                 console.info("STARTING WITH LED " + currentLED.c);
                 break;
             case "scoreboard":
@@ -94,14 +154,14 @@ wss.on('connection', function connection(socket, req) {
     }
 
     function onCtrlCar(action) {
+	    if(!action) action = "stop";
 	    let data = {
 	        message: "control",
             device: "server",
-            data: {
-                action: action
-            }
+            action: action
         };
-        wss.toDevice("car", data);
+	    console.log(data);
+        toDevice("car", data);
     }
 
     function onOverLED(sn){
@@ -110,7 +170,7 @@ wss.on('connection', function connection(socket, req) {
             // Car drove over correct LED
             chooseLED();
             console.info("THUS CHANGING LED TO " + currentLED.c);
-            wss.toDevice("user", {message: "led-counter", device: "server", data: {action: "++"}});
+            toDevice("user", {message: "led-counter", device: "server", data: {action: "++"}});
         }
     }
 
@@ -118,7 +178,6 @@ wss.on('connection', function connection(socket, req) {
     /**
      * Updating Highscore List
      */
-
     function updateHighscores() {
         let data = {
             message: "update-scores",
@@ -127,48 +186,57 @@ wss.on('connection', function connection(socket, req) {
                 scores: scoreBoard
             }
         };
-        wss.toDevice("scoreboard", data);
+        toDevice("scoreboard", data);
     }
 
     /**
      * Choosing a LED
      */
-
-
-
     function chooseLED() {
         let temp = currentLED;
         currentLED = LEDs.nextLED(reachedLEDs);
         let data = {
-            message: "update-scores",
+            message: "next-led",
             device: "server",
             data: {
                 led: currentLED
             }
         };
-        wss.toDevice("base", data);
+        toDevice("LEDManager", data);
         reachedLEDs.push(temp);
     }
 
 
 
+    function startGame(m) {
+        console.info("------- GAME STARTED -------");
+    }
+
+    function stopGame(m) {
+        console.info("------- GAME ENDED -------");
+        const name = m.data.name;
+        const time = m.data.time;
+        const uid = m.data.uid;
+        console.info("User " + name + " reached all LEDs in " + time + " Milliseconds!");
+        scoreBoard.push({name: name, time: time, uid: uid});
+        updateHighscores();
+    }
 
     /**
      * Handling the on_disconnect Event
      */
-
     socket.on('disconnect', () => {
         console.log(device+" has disconnected from the Server.....");
     });
 
 
-    wss.prototype.toDevice = (device, data) => {
-        wss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN && client.device === device) {
-                client.send(JSON.stringify(data));
+    function toDevice(device, data) {
+        wss.clients.forEach(socket => {
+            if (socket.readyState === WebSocket.OPEN && socket.device === device) {
+                socket.send(JSON.stringify(data));
             }
         });
-    };
+    }
 /*
 
 	socket.on("Echo", data => {

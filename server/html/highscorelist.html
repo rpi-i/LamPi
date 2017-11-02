@@ -1,8 +1,9 @@
 <html>
 <head>
     <link rel="stylesheet" href="css/bootstrap.css">
-    <script src="scripts/bootstrap.js"></script>
+    <link rel="stylesheet" href="fonts/fonts.css">
     <script src="scripts/jquery.js"></script>
+    <script src="scripts/bootstrap.js"></script>
 </head>
 <body>
 <table class="table table-striped">
@@ -22,10 +23,11 @@
         const socket = new WebSocket("ws://localhost:80");
         let scores = [];
         socket.onopen = e => {
-            socket.send(JSON.stringify({message: "device", device: "scoreboard"))
+            socket.send(JSON.stringify({message: "device", device: "scoreboard"}));
         };
         socket.onmessage = m => {
             if (m.message === "update-scores") {
+                console.log(message);
                 scores = sortScores(m.data.scores);
                 displayScores();
             }
@@ -51,7 +53,7 @@
         }
 
         function formatTime(t) {
-            let mic=t%100, te=t/100, sec=te%60, min=te/60;
+            let mic=t%100, te=Math.floor(t/100), sec=Math.floor(te%60), min=Math.floor(te/60);
             return l0(min,2)+":"+l0(sec,2)+"."+l0(mic,2)
         }
 
